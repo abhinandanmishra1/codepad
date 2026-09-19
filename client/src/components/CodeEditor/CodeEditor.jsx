@@ -2,14 +2,12 @@ import React, { useState, useRef, useEffect } from "react";
 import Editor from "@monaco-editor/react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faCode, faPlus } from "@fortawesome/free-solid-svg-icons";
-import { registerMonacoTemplates } from "./monacoTemplates";
 import Tooltip from "../ui/tooltip";
 
 const CodeEditor = ({
   code,
   setCode,
   language,
-  getAllTemplates,
   editorInstanceRef,
   onOpenSnippetsModal,
   readOnly = false,
@@ -103,11 +101,6 @@ const CodeEditor = ({
       }
     }
 
-    // Register slash command template completion provider
-    if (getAllTemplates) {
-      registerMonacoTemplates(monaco, getAllTemplates);
-    }
-
     // Track cursor position
     editor.onDidChangeCursorPosition((e) => {
       setCursorPos({
@@ -116,13 +109,6 @@ const CodeEditor = ({
       });
     });
   };
-
-  // Re-register or update templates when getAllTemplates or language changes
-  useEffect(() => {
-    if (monacoRef.current && getAllTemplates) {
-      registerMonacoTemplates(monacoRef.current, getAllTemplates);
-    }
-  }, [getAllTemplates, language?.id]);
 
   return (
     <div className="flex flex-col h-full w-full bg-[#1e1e1e] overflow-hidden">

@@ -83,7 +83,7 @@ export const useSnippets = (languageId) => {
     }
   }, [userId]);
 
-  // On user change: hit cache first, else fetch
+  // On user change: hit cache first with SWR revalidation, else fetch
   useEffect(() => {
     if (!userId) {
       setSnippets([]);
@@ -92,6 +92,8 @@ export const useSnippets = (languageId) => {
     const cached = getSnippetsCache(userId);
     if (cached && Array.isArray(cached)) {
       setSnippets(cached);
+      // Background revalidate (SWR)
+      fetchAndCache();
     } else {
       fetchAndCache();
     }

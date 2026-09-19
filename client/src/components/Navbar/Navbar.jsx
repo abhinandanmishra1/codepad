@@ -53,6 +53,29 @@ const Navbar = ({
   const [codeToDelete, setCodeToDelete] = useState(null);
   const dropdownRef = useRef(null);
   const userMenuRef = useRef(null);
+  const searchDebounceRef = useRef(null);
+
+  // Cleanup search debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (searchDebounceRef.current) {
+        clearTimeout(searchDebounceRef.current);
+      }
+    };
+  }, []);
+
+  const handleSearchChange = (e) => {
+    const val = e.target.value;
+    setSearchFilter(val);
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current);
+    }
+    searchDebounceRef.current = setTimeout(() => {
+      if (onSearchCodes) {
+        onSearchCodes(val);
+      }
+    }, 300);
+  };
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -181,10 +204,7 @@ const Navbar = ({
                   <input
                     type="text"
                     value={searchFilter}
-                    onChange={(e) => {
-                      setSearchFilter(e.target.value);
-                      onSearchCodes && onSearchCodes(e.target.value);
-                    }}
+                    onChange={handleSearchChange}
                     placeholder="Search codes..."
                     className="w-full pl-7 pr-2.5 py-1 bg-[#121212] border border-[#3e3e3e] rounded text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-[#ffa116]"
                   />

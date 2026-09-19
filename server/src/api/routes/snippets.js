@@ -8,6 +8,7 @@ const CMD_REGEX = /^\/[a-z0-9_-]{1,49}$/;
 
 function formatSnippet(snippet) {
   const obj = snippet.toObject ? snippet.toObject() : snippet;
+  const visibility = obj.visibility || (obj.isPublic ? 'public' : 'unlisted');
   return {
     id: obj._id ? obj._id.toString() : obj.id,
     snippetId: obj.snippetId,
@@ -18,6 +19,11 @@ function formatSnippet(snippet) {
     languageName: obj.languageName,
     code: obj.code,
     testCases: obj.testCases || [],
+    visibility,
+    isPublic: visibility === 'public',
+    viewsCount: obj.viewsCount || 0,
+    forksCount: obj.forksCount || 0,
+    forkedFrom: obj.forkedFrom || null,
     createdAt: obj.createdAt,
     updatedAt: obj.updatedAt,
     author: obj.author && (obj.author.username || obj.author.name)
@@ -38,7 +44,8 @@ router.get('/me', authenticateUser, async (req, res) => {
     const filter = { author: req.user._id };
     if (search && search.trim()) {
       const q = search.trim();
-      filter.$or = [{ title: new RegExp(q, 'i') }, { command: new RegExp(q, 'i') }];
+      const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.$or = [{ title: new RegExp(escaped, 'i') }, { command: new RegExp(escaped, 'i') }];
     }
     const snippets = await Snippet.find(filter).sort({ updatedAt: -1 }).lean();
     res.json({ snippets: snippets.map(formatSnippet) });

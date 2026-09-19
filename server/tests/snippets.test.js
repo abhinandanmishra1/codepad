@@ -54,6 +54,7 @@ test('POST /snippets creates a new snippet with unique snippetId', async () => {
     },
     body: JSON.stringify({
       title: 'Binary Exponentiation',
+      command: '/binexp',
       description: 'O(log N) modular exponentiation in C++',
       languageId: 54,
       languageName: 'C++ (GCC 9.2.0)',
@@ -67,6 +68,7 @@ test('POST /snippets creates a new snippet with unique snippetId', async () => {
   const data = await res.json();
   assert.ok(data.snippetId);
   assert.strictEqual(data.title, 'Binary Exponentiation');
+  assert.strictEqual(data.command, '/binexp');
   assert.strictEqual(data.author.name, 'Author Dev');
   assert.strictEqual(data.viewsCount, 0);
   assert.strictEqual(data.forksCount, 0);
@@ -131,12 +133,49 @@ test('POST /snippets/:snippetId/fork creates a clone without copying command', a
   assert.notStrictEqual(data.snippetId, createdSnippetId);
   assert.strictEqual(data.forkedFrom, createdSnippetId);
   assert.strictEqual(data.author.name, 'Other Dev');
-  assert.strictEqual(data.command, ''); // command must NOT be copied on fork
+  assert.match(data.command, /^\/fork-[a-z0-9]+$/); // generated unique fork command
 
   // Verify parent's forksCount incremented
   const parentRes = await fetch(`${baseUrl}/snippets/${createdSnippetId}`);
   const parentData = await parentRes.json();
   assert.strictEqual(parentData.forksCount, 1);
+});
+
+test('GET /snippets/me returns user snippets and safely handles regex search', async () => {
+  const createRes = await fetch(`${baseUrl}/snippets`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${authorToken}`,
+    },
+    body: JSON.stringify({
+      title: 'Test Snippet [Special]',
+      command: '/test',
+      description: 'Snippet with regex brackets (test)',
+      languageId: 63,
+      languageName: 'JavaScript (Node.js)',
+      code: 'console.log("test");',
+      isPublic: true,
+    }),
+  });
+  assert.strictEqual(createRes.status, 201);
+  const secondData = await createRes.json();
+  assert.strictEqual(secondData.command, '/test');
+
+  // Query with special regex characters that would crash unescaped regex
+  const searchRes = await fetch(`${baseUrl}/snippets/me?search=[Special]`, {
+    headers: { Authorization: `Bearer ${authorToken}` },
+  });
+  assert.strictEqual(searchRes.status, 200);
+  const searchData = await searchRes.json();
+  assert.ok(Array.isArray(searchData.snippets));
+  assert.ok(searchData.snippets.some((s) => s.command === '/test'));
+
+  // Clean up
+  try {
+    const Snippet = (await import('../src/db/models/Snippet.js')).default;
+    await Snippet.deleteOne({ snippetId: secondData.snippetId });
+  } catch {}
 });
 
 test('GET /snippets returns paginated public snippets list', async () => {

@@ -17,6 +17,20 @@ export const SaveModal = ({
 
   const lineCount = (code || '').split('\n').length;
 
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    onSave({
+      name: name.trim(),
+      description: description.trim(),
+      languageId: currentLanguage?.id || 54,
+      languageName: currentLanguage?.name || 'C++',
+      code,
+      testCases,
+    });
+    onClose();
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-150">
       <div className="bg-[#242424] border border-[#3e3e3e] rounded-xl w-full max-w-md shadow-2xl overflow-hidden font-sans text-xs text-gray-200">
@@ -30,7 +44,7 @@ export const SaveModal = ({
           </button>
         </div>
 
-        <form onSubmit={(e) => { e.preventDefault(); if (!name.trim()) return; onSave({ name: name.trim(), description: description.trim(), languageId: currentLanguage?.id || 54, languageName: currentLanguage?.name || 'C++', code, testCases }); onClose(); }} className="p-4 space-y-4">
+        <form onSubmit={handleSubmit} className="p-4 space-y-4">
           <div className="flex items-center justify-between p-2.5 rounded-lg bg-[#1a1a1a] border border-[#333333] text-gray-400">
             <span className="flex items-center space-x-1.5">
               <FontAwesomeIcon icon={faCode} className="text-xs text-[#2cbb5d]" />

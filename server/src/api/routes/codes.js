@@ -31,7 +31,14 @@ router.get('/me', authenticateUser, async (req, res) => {
     const { search } = req.query;
 
     const filter = { author: req.user._id };
-    if (search && search.trim()) filter.$text = { $search: search.trim() };
+    if (search && search.trim()) {
+      const q = search.trim();
+      const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.$or = [
+        { title: new RegExp(escaped, 'i') },
+        { description: new RegExp(escaped, 'i') },
+      ];
+    }
 
     const [codes, total] = await Promise.all([
       Code.find(filter).sort({ updatedAt: -1 }).skip(skip).limit(limit).lean(),

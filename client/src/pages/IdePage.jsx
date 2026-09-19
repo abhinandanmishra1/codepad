@@ -234,21 +234,12 @@ function IdePage() {
     fetchSnippet();
   }, [snippetId, user]);
 
-  const getAllTemplates = useCallback(
-    (langId) => {
-      const targetId = langId || language?.id;
-      return (snippets || [])
-        .filter((s) => !s.languageId || s.languageId === targetId || Number(s.languageId) === Number(targetId))
-        .map((s) => ({
-          ...s,
-          name: s.title || s.name || "",
-        }));
-    },
-    [snippets, language?.id]
-  );
-
   // Handle language switch
   const handleLanguageChange = (newLang) => {
+    if (currentCode && currentCode.languageId !== newLang.id) {
+      setCurrentCode(null);
+    }
+
     if (!isReadOnly) {
       saveCode(language.id, code);
       saveTestCases(language.id, testCases);
@@ -370,7 +361,7 @@ function IdePage() {
         // Update existing owned snippet
         const updated = await snippetsApi.update(cloudSnippet.snippetId, payload);
         setCloudSnippet(updated);
-        showToast("Snippet updated on cloud!");
+        showToast("Snippet updated!");
         return updated;
       } else {
         // Create new snippet
@@ -378,12 +369,12 @@ function IdePage() {
         setCloudSnippet(created);
         setIsReadOnly(false);
         await refetchSnippets();
-        showToast(`Saved to cloud! Snippet ID: ${created.snippetId}`);
+        showToast(`Snippet published! Snippet ID: ${created.snippetId}`);
         navigate(`/s/${created.snippetId}`, { replace: true });
         return created;
       }
     } catch (err) {
-      showToast(err.response?.data?.message || "Failed to save to cloud", "info");
+      showToast(err.response?.data?.message || "Failed to publish snippet", "info");
       return null;
     }
   };
@@ -682,7 +673,6 @@ function IdePage() {
           code={code}
           setCode={handleCodeChange}
           language={language}
-          getAllTemplates={getAllTemplates}
           editorInstanceRef={editorInstanceRef}
           onOpenSnippetsModal={() => setIsSnippetsModalOpen(true)}
           readOnly={isReadOnly}
@@ -709,7 +699,6 @@ function IdePage() {
         isOpen={isSaveModalOpen}
         onClose={() => setIsSaveModalOpen(false)}
         initialName={currentCode?.title || cloudSnippet?.title || ""}
-        initialCommand=""
         initialDescription={currentCode?.description || cloudSnippet?.description || ""}
         onSave={async (data) => {
           try {
