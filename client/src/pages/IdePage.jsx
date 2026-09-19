@@ -628,19 +628,6 @@ function IdePage() {
         }}
         onLoadCode={handleLoadCode}
         onDeleteCode={handleDeleteCode}
-        // Backward-compatibility props for Navbar before Task 8
-        savedProblems={savedCodes.map((c) => ({
-          id: c.codeId,
-          codeId: c.codeId,
-          name: c.title,
-          title: c.title,
-          languageId: c.languageId,
-          languageName: c.languageName,
-          code: c.code,
-          testCases: c.testCases,
-        }))}
-        onLoadProblem={handleLoadCode}
-        onDeleteProblem={handleDeleteCode}
         isRunning={isRunning}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
       />
