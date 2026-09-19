@@ -5,6 +5,7 @@ import ConsolePanel from "../components/Console/ConsolePanel";
 import Navbar from "../components/Navbar/Navbar";
 import SplitPane from "../components/SplitPane/SplitPane";
 import SaveModal from "../components/SavedCodes/SaveModal";
+import SnippetSaveModal from "../components/SavedCodes/SnippetSaveModal";
 import ResetModal from "../components/ResetModal/ResetModal";
 import SnippetLibraryModal from "../components/Templates/SnippetLibraryModal";
 import ShareModal from "../components/Share/ShareModal";
@@ -12,8 +13,9 @@ import SharedBanner from "../components/SharedBanner/SharedBanner";
 import AuthModal from "../components/Auth/AuthModal";
 import { LANGUAGES } from "../constants/languages";
 import { boilerCodes } from "../boilerCodes";
-import { submitCode, snippetsApi, usersApi } from "../api";
+import { submitCode, snippetsApi, codesApi } from "../api";
 import { useAuth } from "../context/AuthContext";
+import { useSnippets } from "../Hook/useSnippets";
 import {
   getSavedCode,
   saveCode,
@@ -22,13 +24,6 @@ import {
   saveTestCases,
   getSavedLanguage,
   saveLanguage,
-  getSavedProblems,
-  saveProblem,
-  deleteProblem,
-  getTemplates,
-  saveTemplate,
-  deleteTemplate,
-  normalizeId,
 } from "../utils/storage";
 
 // Safe base64 decoding helper
@@ -70,9 +65,23 @@ function IdePage() {
   const [alertMessage, setAlertMessage] = useState(null);
   const [toastMessage, setToastMessage] = useState(null);
 
+  // Snippets hook (fetching, cache, Monaco completions)
+  const {
+    snippets,
+    loading: snippetsLoading,
+    refetch: refetchSnippets,
+    deleteSnippet: deleteSnippetFromCloud,
+  } = useSnippets(language?.id);
+
+  // Saved codes state & pagination
+  const [savedCodes, setSavedCodes] = useState([]);
+  const [codesLoading, setCodesLoading] = useState(false);
+  const [codesPagination, setCodesPagination] = useState({ page: 1, total: 0, totalPages: 1 });
+  const [codesSearch, setCodesSearch] = useState("");
+  const [currentCode, setCurrentCode] = useState(null);
+
   // Cloud snippet & sharing state
   const [cloudSnippet, setCloudSnippet] = useState(null);
-  const [currentProblem, setCurrentProblem] = useState(null);
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [isForking, setIsForking] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
@@ -80,57 +89,36 @@ function IdePage() {
 
   // Modals state
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
+  const [isSnippetSaveModalOpen, setIsSnippetSaveModalOpen] = useState(false);
+  const [snippetSaveError, setSnippetSaveError] = useState("");
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [isSnippetsModalOpen, setIsSnippetsModalOpen] = useState(false);
 
-  // Saved collections state
-  const [savedProblems, setSavedProblems] = useState(() => getSavedProblems());
-  const [templates, setTemplates] = useState(() => getTemplates());
+  // Load user's saved codes on mount or user change
+  const loadCodes = useCallback(
+    async (page = 1, search = "") => {
+      if (!user) return;
+      setCodesLoading(true);
+      try {
+        const data = await codesApi.getMyCodes({ page, limit: 50, search });
+        setSavedCodes((prev) => (page === 1 ? data.codes : [...prev, ...data.codes]));
+        setCodesPagination(data.pagination);
+      } catch (err) {
+        console.warn("Failed to load codes:", err);
+      } finally {
+        setCodesLoading(false);
+      }
+    },
+    [user]
+  );
 
-  // Load all templates and sync user's cloud snippets on mount or login
   useEffect(() => {
-    // Always reload all available templates
-    setTemplates(getTemplates());
-
-    // If user is logged in, fetch cloud snippets and merge with saved codes
-    if (user?.username) {
-      usersApi
-        .getSnippets(user.username)
-        .then((cloudList) => {
-          if (!Array.isArray(cloudList)) return;
-          const localList = getSavedProblems();
-          const cloudItems = cloudList.map((s) => ({
-            id: s.snippetId,
-            name: s.title,
-            command: s.description?.startsWith("/") ? s.description : null,
-            languageId: s.languageId,
-            languageName: s.languageName,
-            code: s.code,
-            testCases: s.testCases || [],
-            updatedAt: new Date(s.updatedAt || s.createdAt).getTime(),
-            isCloud: true,
-            snippetId: s.snippetId,
-          }));
-
-          // Merge: cloud items and local items, avoiding duplicates by id
-          const map = new Map();
-          cloudItems.forEach((item) => map.set(item.id, item));
-          localList.forEach((item) => {
-            if (!map.has(item.id)) {
-              map.set(item.id, item);
-            }
-          });
-
-          const merged = Array.from(map.values()).sort(
-            (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)
-          );
-          setSavedProblems(merged);
-        })
-        .catch(() => {
-          // Fallback to local storage if network unavailable
-        });
+    if (!user) {
+      setSavedCodes([]);
+      return;
     }
-  }, [user]);
+    loadCodes(1, "");
+  }, [user, loadCodes]);
 
   // Handle code snippet passed from Learnings ("Run in CodePad")
   useEffect(() => {
@@ -142,20 +130,15 @@ function IdePage() {
       }
       setIsReadOnly(false);
       setCloudSnippet(null);
-      setCurrentProblem({
-        name: "Snippet from Learnings",
-        command: null,
+      setCurrentCode({
+        title: "Snippet from Learnings",
         description: "Imported from CodePad Learnings",
-        id: "learnings-import-" + Date.now(),
-        isCloud: false,
       });
       showToast("Loaded snippet from Learnings into editor", "success");
     }
   }, [location.state]);
 
   const saveTimeoutRef = useRef(null);
-  const cloudSyncTimeoutRef = useRef(null);
-  const [cloudSyncStatus, setCloudSyncStatus] = useState("idle"); // "idle" | "saving" | "saved" | "error"
   const editorInstanceRef = useRef(null);
   const latestStateRef = useRef({});
 
@@ -166,7 +149,7 @@ function IdePage() {
       testCases,
       language,
       cloudSnippet,
-      currentProblem,
+      currentCode,
       user,
       isReadOnly,
     };
@@ -175,9 +158,6 @@ function IdePage() {
   // Cleanup auto-save timeouts on unmount
   useEffect(() => {
     return () => {
-      if (cloudSyncTimeoutRef.current) {
-        clearTimeout(cloudSyncTimeoutRef.current);
-      }
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
       }
@@ -226,13 +206,7 @@ function IdePage() {
       try {
         const data = await snippetsApi.getById(snippetId);
         setCloudSnippet(data);
-        setCurrentProblem({
-          name: data.title,
-          command: data.command || null,
-          description: data.description || "",
-          id: data.snippetId,
-          isCloud: true,
-        });
+        setCurrentCode(null);
 
         // Find language matching snippet
         const matchedLang = LANGUAGES.find((l) => l.id === data.languageId) || language;
@@ -263,81 +237,15 @@ function IdePage() {
   const getAllTemplates = useCallback(
     (langId) => {
       const targetId = langId || language?.id;
-      return templates.filter((t) => !t.languageId || t.languageId === targetId);
+      return (snippets || [])
+        .filter((s) => !s.languageId || s.languageId === targetId || Number(s.languageId) === Number(targetId))
+        .map((s) => ({
+          ...s,
+          name: s.title || s.name || "",
+        }));
     },
-    [templates, language?.id]
+    [snippets, language?.id]
   );
-
-  // Debounced auto-save to cloud with 500ms debounce using the same snippetId
-  const scheduleCloudUpdate = useCallback(() => {
-    const { cloudSnippet: curSnippet, user: curUser, isReadOnly: curReadOnly } = latestStateRef.current;
-    if (!curSnippet?.snippetId || !curUser || curSnippet.author?.id !== curUser.id || curReadOnly) {
-      return;
-    }
-
-    setCloudSyncStatus("saving");
-
-    if (cloudSyncTimeoutRef.current) {
-      clearTimeout(cloudSyncTimeoutRef.current);
-    }
-
-    cloudSyncTimeoutRef.current = setTimeout(async () => {
-      const {
-        code: latestCode,
-        testCases: latestCases,
-        language: latestLang,
-        cloudSnippet: targetSnippet,
-        currentProblem: targetProblem,
-        user: targetUser,
-        isReadOnly: targetReadOnly,
-      } = latestStateRef.current;
-
-      if (!targetSnippet?.snippetId || !targetUser || targetSnippet.author?.id !== targetUser.id || targetReadOnly) {
-        setCloudSyncStatus("idle");
-        return;
-      }
-
-      try {
-        const payload = {
-          title: targetProblem?.name || targetSnippet.title || `${latestLang.name} Solution`,
-          command: targetProblem?.command || targetSnippet.command || "",
-          description: targetProblem?.description || targetSnippet.description || "",
-          languageId: latestLang.id,
-          languageName: latestLang.name,
-          code: latestCode,
-          testCases: latestCases,
-          visibility: targetSnippet.visibility || (targetSnippet.isPublic ? "public" : "unlisted"),
-          isPublic: targetSnippet.visibility === "public",
-        };
-
-        const updated = await snippetsApi.update(targetSnippet.snippetId, payload);
-        setCloudSnippet(updated);
-        setCloudSyncStatus("saved");
-
-        // Keep local storage synchronized too
-        saveProblem({
-          id: targetProblem?.id || targetSnippet.snippetId,
-          name: payload.title,
-          command: payload.command || null,
-          description: payload.description || "",
-          languageId: latestLang.id,
-          languageName: latestLang.name,
-          code: latestCode,
-          testCases: latestCases,
-          isCloud: true,
-          snippetId: targetSnippet.snippetId,
-        });
-
-        // Revert saved badge back to idle after 2.5s
-        setTimeout(() => {
-          setCloudSyncStatus((prev) => (prev === "saved" ? "idle" : prev));
-        }, 2500);
-      } catch (err) {
-        console.warn("Debounced cloud auto-save failed:", err);
-        setCloudSyncStatus("error");
-      }
-    }, 500);
-  }, []);
 
   // Handle language switch
   const handleLanguageChange = (newLang) => {
@@ -358,14 +266,13 @@ function IdePage() {
       setTestCases(savedCases);
       latestStateRef.current.testCases = savedCases;
       setActiveCaseId(savedCases[0]?.id || "1");
-      scheduleCloudUpdate();
     }
 
     setResults(null);
     setOverallStatus(null);
   };
 
-  // Handle code change with debounced save (local 300ms + cloud 500ms)
+  // Handle code change with local transient save (300ms debounce)
   const handleCodeChange = (newCode) => {
     setCode(newCode);
     latestStateRef.current.code = newCode;
@@ -377,9 +284,7 @@ function IdePage() {
         saveCode(language.id, newCode);
       }
     }, 300);
-
-    // Debounced cloud update with same ID if saved on cloud
-    scheduleCloudUpdate();
+    // No cloud auto-sync — save is explicit
   };
 
   // Add / Remove / Update Testcase
@@ -404,7 +309,6 @@ function IdePage() {
     latestStateRef.current.testCases = updated;
     setTestCases(updated);
     setActiveCaseId(newCase.id);
-    scheduleCloudUpdate();
   };
 
   const handleRemoveCase = (caseId) => {
@@ -416,27 +320,21 @@ function IdePage() {
     if (activeCaseId === caseId) {
       setActiveCaseId(updated[0]?.id || "1");
     }
-    scheduleCloudUpdate();
   };
 
   const handleUpdateCase = (caseId, field, value) => {
     const updated = testCases.map((c) => (c.id === caseId ? { ...c, [field]: value } : c));
     latestStateRef.current.testCases = updated;
     setTestCases(updated);
-    scheduleCloudUpdate();
   };
 
   // Reset code to boilerplate template
   const handleConfirmReset = () => {
-    if (cloudSyncTimeoutRef.current) {
-      clearTimeout(cloudSyncTimeoutRef.current);
-    }
-    setCloudSyncStatus("idle");
     resetSavedCode(language.id);
     const defaultBoiler = boilerCodes(language.id);
     setCode(defaultBoiler);
     saveCode(language.id, defaultBoiler);
-    setCurrentProblem(null);
+    setCurrentCode(null);
     setCloudSnippet(null);
     showToast(`Reset code to template for ${language.name}!`);
     if (snippetId) {
@@ -444,16 +342,23 @@ function IdePage() {
     }
   };
 
-  // Save to MongoDB Cloud
+  // Save to MongoDB Cloud (for sharing)
   const handleSaveToCloud = async () => {
     if (!user) {
       setIsAuthModalOpen(true);
-      showToast("Please sign in to save code to the cloud.", "info");
-      return;
+      showToast("Please sign in to share code.", "info");
+      return null;
     }
     try {
+      const baseCmd = (currentCode?.title || language.name)
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "")
+        .slice(0, 15);
+      const command = `/${baseCmd || "snippet"}_${Date.now().toString(36)}`;
       const payload = {
-        title: cloudSnippet?.title || `${language.name} Solution`,
+        title: currentCode?.title || `${language.name} Solution`,
+        command,
+        description: currentCode?.description || "",
         languageId: language.id,
         languageName: language.name,
         code,
@@ -466,16 +371,20 @@ function IdePage() {
         const updated = await snippetsApi.update(cloudSnippet.snippetId, payload);
         setCloudSnippet(updated);
         showToast("Snippet updated on cloud!");
+        return updated;
       } else {
         // Create new snippet
         const created = await snippetsApi.create(payload);
         setCloudSnippet(created);
         setIsReadOnly(false);
+        await refetchSnippets();
         showToast(`Saved to cloud! Snippet ID: ${created.snippetId}`);
         navigate(`/s/${created.snippetId}`, { replace: true });
+        return created;
       }
     } catch (err) {
       showToast(err.response?.data?.message || "Failed to save to cloud", "info");
+      return null;
     }
   };
 
@@ -491,23 +400,16 @@ function IdePage() {
     try {
       const forked = await snippetsApi.fork(cloudSnippet.snippetId);
       setCloudSnippet(forked);
-      setCurrentProblem({
-        name: forked.title,
-        command: null, // Do not copy command on fork
-        description: forked.description || "",
-        id: forked.snippetId,
-        isCloud: true,
-      });
+      setCurrentCode(null);
       setIsReadOnly(false);
       showToast(`Forked! You now have your own editable copy.`);
       navigate(`/s/${forked.snippetId}`, { replace: true });
     } catch (err) {
       // Local fallback fork
       setIsReadOnly(false);
-      setCurrentProblem({
-        name: `${cloudSnippet.title} (Fork)`,
-        command: null,
-        id: normalizeId(`${cloudSnippet.title}_fork`),
+      setCurrentCode({
+        title: `${cloudSnippet.title} (Fork)`,
+        description: cloudSnippet.description || "",
       });
       showToast("Cloned code into your active editor!");
       navigate("/ide", { replace: true });
@@ -523,7 +425,7 @@ function IdePage() {
       showToast("Please sign in to save this as your snippet.", "info");
       return;
     }
-    setIsSaveModalOpen(true);
+    setIsSnippetSaveModalOpen(true);
   };
 
   // Open Share modal
@@ -535,11 +437,41 @@ function IdePage() {
     }
     if (!cloudSnippet) {
       // Auto-save to cloud first to get a permanent URL
-      handleSaveToCloud().then(() => {
-        setIsShareModalOpen(true);
+      handleSaveToCloud().then((created) => {
+        if (created) setIsShareModalOpen(true);
       });
     } else {
       setIsShareModalOpen(true);
+    }
+  };
+
+  // Load a saved code into the active editor
+  const handleLoadCode = (codeItem) => {
+    const matchedLang = LANGUAGES.find((l) => l.id === codeItem.languageId) || language;
+    setLanguage(matchedLang);
+    setCode(codeItem.code || "");
+    setTestCases(codeItem.testCases || []);
+    setCurrentCode(codeItem);
+    setCloudSnippet(null);
+    setIsReadOnly(false);
+    showToast(`Loaded "${codeItem.title}" into editor!`);
+  };
+
+  // Delete a saved code from cloud
+  const handleDeleteCode = async (codeId) => {
+    try {
+      await codesApi.delete(codeId);
+      setSavedCodes((prev) => prev.filter((c) => c.codeId !== codeId));
+      setCodesPagination((prev) => ({
+        ...prev,
+        total: Math.max(0, prev.total - 1),
+      }));
+      if (currentCode?.codeId === codeId) {
+        setCurrentCode(null);
+      }
+      showToast("Code deleted.", "info");
+    } catch (err) {
+      showToast("Failed to delete code.", "error");
     }
   };
 
@@ -653,97 +585,62 @@ function IdePage() {
         onOpenSaveModal={async () => {
           if (!user) {
             setIsAuthModalOpen(true);
-            showToast("Please sign in with Google to save your code to cloud.", "info");
+            showToast("Please sign in to save your code.", "info");
             return;
           }
-
-          // If already saved with name, quick-save directly!
-          if (currentProblem?.name || (cloudSnippet && cloudSnippet.author?.id === user.id)) {
-            if (cloudSyncTimeoutRef.current) {
-              clearTimeout(cloudSyncTimeoutRef.current);
-            }
-
-            const saveName = currentProblem?.name || cloudSnippet?.title || `${language.name} Solution`;
-            const saveCmd = currentProblem?.command || null;
-            const problemData = {
-              id: currentProblem?.id || (cloudSnippet ? normalizeId(cloudSnippet.title) : normalizeId(saveName)),
-              name: saveName,
-              command: saveCmd,
-              languageId: language.id,
-              languageName: language.name,
-              code,
-              testCases,
-            };
-
-            saveProblem(problemData);
-            setSavedProblems(getSavedProblems());
-
+          if (currentCode?.codeId) {
+            // Quick-save existing code
             try {
               const payload = {
-                title: saveName,
-                command: saveCmd || "",
-                description: currentProblem?.description || cloudSnippet?.description || "",
+                title: currentCode.title,
+                description: currentCode.description || "",
                 languageId: language.id,
                 languageName: language.name,
                 code,
                 testCases,
-                visibility: cloudSnippet?.visibility || (cloudSnippet?.isPublic ? "public" : "unlisted"),
-                isPublic: cloudSnippet?.visibility === "public",
               };
-
-              if (cloudSnippet && cloudSnippet.author?.id === user.id) {
-                const updated = await snippetsApi.update(cloudSnippet.snippetId, payload);
-                setCloudSnippet(updated);
-                setCurrentProblem({ name: updated.title, command: saveCmd, description: payload.description, id: updated.snippetId, isCloud: true });
-                setCloudSyncStatus("saved");
-                showToast(`Saved changes to "${saveName}" on Cloud!`);
-              } else {
-                const created = await snippetsApi.create(payload);
-                setCloudSnippet(created);
-                setCurrentProblem({ name: created.title, command: saveCmd, description: payload.description, id: created.snippetId, isCloud: true });
-                setCloudSyncStatus("saved");
-                showToast(`Saved "${saveName}" to Cloud!`);
-                navigate(`/s/${created.snippetId}`, { replace: true });
-              }
+              const updated = await codesApi.update(currentCode.codeId, payload);
+              setCurrentCode(updated);
+              setSavedCodes((prev) =>
+                prev.map((c) => (c.codeId === updated.codeId ? updated : c))
+              );
+              showToast(`Saved "${updated.title}"!`);
             } catch (err) {
-              showToast(`Saved "${saveName}" locally.`, "info");
+              showToast(err.response?.data?.message || "Failed to save", "error");
             }
           } else {
             setIsSaveModalOpen(true);
           }
         }}
         onShare={handleOpenShare}
-        activeSnippetId={cloudSnippet?.snippetId || currentProblem?.id}
-        activeSnippetName={currentProblem?.name || cloudSnippet?.title || ""}
-        activeSnippetCommand={currentProblem?.command || cloudSnippet?.command || ""}
-        cloudSnippet={cloudSnippet}
-        cloudSyncStatus={cloudSyncStatus}
-        savedProblems={savedProblems}
-        onLoadProblem={(p) => {
-          const matchedLang = LANGUAGES.find((l) => l.id === p.languageId) || language;
-          setLanguage(matchedLang);
-          setCode(p.code || "");
-          setTestCases(p.testCases || []);
-          setCurrentProblem({
-            name: p.name,
-            command: p.command || null,
-            id: p.id,
-            isCloud: !!p.isCloud,
-          });
-          if (p.isCloud && p.snippetId) {
-            navigate(`/s/${p.snippetId}`, { replace: true });
-          } else {
-            showToast(`Loaded "${p.name}" into editor!`);
+        activeSnippetName={currentCode?.title || cloudSnippet?.title || ""}
+        savedCodes={savedCodes}
+        codesLoading={codesLoading}
+        codesPagination={codesPagination}
+        onSearchCodes={(q) => {
+          setCodesSearch(q);
+          loadCodes(1, q);
+        }}
+        onLoadMoreCodes={() => {
+          if (codesPagination.page < codesPagination.totalPages) {
+            loadCodes(codesPagination.page + 1, codesSearch);
           }
         }}
-        onDeleteProblem={(id) => {
-          deleteProblem(id);
-          setSavedProblems((prev) => prev.filter((p) => p.id !== id));
-          if (currentProblem?.id === id) {
-            setCurrentProblem(null);
-          }
-          showToast("Snippet deleted.", "info");
-        }}
+        onLoadCode={handleLoadCode}
+        onDeleteCode={handleDeleteCode}
+        // Backward-compatibility props for Navbar before Task 8
+        savedProblems={savedCodes.map((c) => ({
+          id: c.codeId,
+          codeId: c.codeId,
+          name: c.title,
+          title: c.title,
+          languageId: c.languageId,
+          languageName: c.languageName,
+          code: c.code,
+          testCases: c.testCases,
+        }))}
+        onLoadProblem={handleLoadCode}
+        onDeleteProblem={handleDeleteCode}
         isRunning={isRunning}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
       />
@@ -824,65 +721,25 @@ function IdePage() {
       <SaveModal
         isOpen={isSaveModalOpen}
         onClose={() => setIsSaveModalOpen(false)}
-        initialName={currentProblem?.name || cloudSnippet?.title || ""}
-        initialCommand={currentProblem?.command || cloudSnippet?.command || ""}
-        initialDescription={currentProblem?.description || cloudSnippet?.description || ""}
+        initialName={currentCode?.title || cloudSnippet?.title || ""}
+        initialCommand=""
+        initialDescription={currentCode?.description || cloudSnippet?.description || ""}
         onSave={async (data) => {
-          if (cloudSyncTimeoutRef.current) {
-            clearTimeout(cloudSyncTimeoutRef.current);
-          }
-
-          const saved = saveProblem(data);
-          if (saved) {
-            setSavedProblems(getSavedProblems());
-          }
-          setCurrentProblem({
-            name: data.name,
-            command: data.command || null,
-            description: data.description || "",
-            id: data.id,
-            isCloud: !!user,
-          });
-          if (user) {
-            try {
-              const payload = {
-                title: data.name || `${language.name} Solution`,
-                command: data.command || "",
-                description: data.description || "",
-                languageId: data.languageId || language.id,
-                languageName: data.languageName || language.name,
-                code: data.code || code,
-                testCases: data.testCases || testCases,
-                visibility: cloudSnippet?.visibility || "unlisted",
-                isPublic: cloudSnippet?.visibility === "public",
-              };
-              if (cloudSnippet && cloudSnippet.author?.id === user.id) {
-                const updated = await snippetsApi.update(cloudSnippet.snippetId, payload);
-                setCloudSnippet(updated);
-                setCurrentProblem({
-                  name: updated.title,
-                  command: data.command || null,
-                  id: updated.snippetId,
-                  isCloud: true,
-                });
-                setCloudSyncStatus("saved");
-                showToast(`Saved "${data.name}" to Cloud!`);
-              } else {
-                const created = await snippetsApi.create(payload);
-                setCloudSnippet(created);
-                setCurrentProblem({
-                  name: created.title,
-                  command: data.command || null,
-                  id: created.snippetId,
-                  isCloud: true,
-                });
-                setCloudSyncStatus("saved");
-                showToast(`Saved "${data.name}" to Cloud! (ID: ${created.snippetId})`);
-                navigate(`/s/${created.snippetId}`, { replace: true });
-              }
-            } catch (err) {
-              showToast(`Saved "${data.name}" locally.`, "info");
-            }
+          try {
+            const created = await codesApi.create({
+              title: data.name,
+              description: data.description || "",
+              languageId: data.languageId || language.id,
+              languageName: data.languageName || language.name,
+              code: data.code || code,
+              testCases: data.testCases || testCases,
+            });
+            setSavedCodes((prev) => [created, ...prev]);
+            setCurrentCode(created);
+            setCodesPagination((prev) => ({ ...prev, total: prev.total + 1 }));
+            showToast(`Saved "${created.title}"!`);
+          } catch (err) {
+            showToast(err.response?.data?.message || "Failed to save", "error");
           }
         }}
         currentLanguage={language}
@@ -900,23 +757,69 @@ function IdePage() {
       <SnippetLibraryModal
         isOpen={isSnippetsModalOpen}
         onClose={() => setIsSnippetsModalOpen(false)}
-        allSnippets={getAllTemplates(language?.id)}
+        allSnippets={snippets.map((s) => ({ ...s, name: s.title || s.name || "" }))}
+        loading={snippetsLoading}
         currentLanguage={language}
+        onSaveAsSnippet={() => {
+          setIsSnippetsModalOpen(false);
+          setIsSnippetSaveModalOpen(true);
+        }}
         onInsertSnippet={(snippetCode) => {
           const editor = editorInstanceRef.current;
           if (editor && !isReadOnly) {
             const selection = editor.getSelection();
-            editor.executeEdits("snippet-insert", [{ range: selection, text: snippetCode, forceMoveMarkers: true }]);
+            editor.executeEdits("snippet-insert", [
+              { range: selection, text: snippetCode, forceMoveMarkers: true },
+            ]);
             editor.focus();
           } else if (!isReadOnly) {
             setCode((prev) => prev + "\n" + snippetCode);
           }
           showToast("Snippet inserted!");
         }}
-        onDeleteSnippet={(cmd, langId) => {
-          deleteTemplate(cmd, langId);
-          setTemplates(getTemplates());
-          showToast(`Deleted snippet "${cmd}".`, "info");
+        onDeleteSnippet={async (snippetIdOrCmd) => {
+          const target = snippets.find(
+            (s) => s.snippetId === snippetIdOrCmd || s._id === snippetIdOrCmd || s.command === snippetIdOrCmd
+          );
+          const idToDelete = target?.snippetId || target?._id || snippetIdOrCmd;
+          try {
+            await deleteSnippetFromCloud(idToDelete);
+            showToast("Snippet deleted.", "info");
+          } catch (err) {
+            showToast("Failed to delete snippet.", "error");
+          }
+        }}
+      />
+
+      <SnippetSaveModal
+        isOpen={isSnippetSaveModalOpen}
+        onClose={() => {
+          setIsSnippetSaveModalOpen(false);
+          setSnippetSaveError("");
+        }}
+        serverError={snippetSaveError}
+        currentLanguage={language}
+        code={code}
+        testCases={testCases}
+        onSave={async (data) => {
+          try {
+            const created = await snippetsApi.create({
+              title: data.name,
+              command: data.command,
+              description: data.description,
+              languageId: data.languageId,
+              languageName: data.languageName,
+              code: data.code,
+              testCases: data.testCases,
+            });
+            await refetchSnippets(); // invalidates cache, re-registers Monaco completions
+            setIsSnippetSaveModalOpen(false);
+            setSnippetSaveError("");
+            showToast(`Snippet "${created.command}" saved!`);
+          } catch (err) {
+            const msg = err.response?.data?.message || "Failed to save snippet";
+            setSnippetSaveError(msg);
+          }
         }}
       />
 
