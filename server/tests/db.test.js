@@ -45,6 +45,7 @@ test('User model enforces lowercase username format', async () => {
 test('Snippet model generates default 10-char snippetId and validates fields', async () => {
   const snippet = new Snippet({
     title: 'Two Sum',
+    command: '/two-sum',
     languageId: 63,
     languageName: 'JavaScript (Node.js)',
     code: 'console.log("hello");',

@@ -10,8 +10,6 @@ import {
   faSearch,
   faTrash,
   faArrowRight,
-  faCloud,
-  faCloudArrowUp,
   faShareNodes,
   faCompass,
   faRightFromBracket,
@@ -32,16 +30,15 @@ const Navbar = ({
   onRun,
   onReset,
   onOpenSaveModal,
-  onSaveToCloud,
   onShare,
-  activeSnippetId,
   activeSnippetName = "",
-  activeSnippetCommand = "",
-  cloudSnippet = null,
-  cloudSyncStatus = "idle",
-  savedProblems = [],
-  onLoadProblem,
-  onDeleteProblem,
+  savedCodes = [],
+  codesLoading = false,
+  codesPagination = { total: 0, page: 1, totalPages: 1 },
+  onSearchCodes,
+  onLoadMoreCodes,
+  onLoadCode,
+  onDeleteCode,
   isRunning,
   onOpenAuthModal,
 }) => {
@@ -53,15 +50,32 @@ const Navbar = ({
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [searchFilter, setSearchFilter] = useState("");
-  const [problemToDelete, setProblemToDelete] = useState(null);
+  const [codeToDelete, setCodeToDelete] = useState(null);
   const dropdownRef = useRef(null);
   const userMenuRef = useRef(null);
+  const searchDebounceRef = useRef(null);
 
-  const cleanCommand = (() => {
-    if (!activeSnippetCommand) return "";
-    const match = String(activeSnippetCommand).trim().match(/^(\/[a-z0-9_-]+)/i);
-    return match ? match[1] : "";
-  })();
+  // Cleanup search debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (searchDebounceRef.current) {
+        clearTimeout(searchDebounceRef.current);
+      }
+    };
+  }, []);
+
+  const handleSearchChange = (e) => {
+    const val = e.target.value;
+    setSearchFilter(val);
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current);
+    }
+    searchDebounceRef.current = setTimeout(() => {
+      if (onSearchCodes) {
+        onSearchCodes(val);
+      }
+    }, 300);
+  };
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -78,19 +92,6 @@ const Navbar = ({
       document.removeEventListener("mousedown", handleOutsideClick);
     };
   }, []);
-
-  const filteredProblems = savedProblems.filter((p) => {
-    if (!searchFilter.trim()) return true;
-    const q = searchFilter.toLowerCase();
-    return (
-      (p.name && p.name.toLowerCase().includes(q)) ||
-      (p.id && p.id.toLowerCase().includes(q)) ||
-      (p.languageName && p.languageName.toLowerCase().includes(q)) ||
-      (p.command && p.command.toLowerCase().includes(q))
-    );
-  });
-
-  const displayedProblems = filteredProblems.slice(0, 10);
 
   return (
     <div className="bg-[#282828] border-b border-[#3e3e3e] px-4 py-2 flex items-center justify-between gap-3 select-none flex-shrink-0 h-[50px] relative z-40">
@@ -130,23 +131,17 @@ const Navbar = ({
         </div>
       </div>
 
-      {/* Center Controls: Language Selector, Save, Cloud, Share, Reset */}
+      {/* Center Controls: Language Selector, Save, Share, Reset */}
       <div className="flex items-center space-x-1.5 sm:space-x-2.5">
         <LanguageDropdown language={language} setLanguage={setLanguage} />
 
-        {/* Combined Local Save Button + Dropdown */}
+        {/* Combined Save Button + Dropdown */}
         <div className="relative inline-flex items-center" ref={dropdownRef}>
           <Tooltip
             content={
-              cloudSyncStatus === "saving"
-                ? "Auto-saving changes to cloud (500ms debounce)..."
-                : activeSnippetName
-                ? user && cloudSnippet?.author?.id === user.id
-                  ? `Save changes to "${activeSnippetName}" (Auto-saves to cloud on edit)`
-                  : `Save changes to "${activeSnippetName}" ${
-                      cleanCommand ? `(${cleanCommand})` : ""
-                    } (Ctrl + S)`
-                : "Save snippet to cloud (Ctrl + S)"
+              activeSnippetName
+                ? `Save changes to "${activeSnippetName}" (Ctrl + S)`
+                : "Save code (Ctrl + S)"
             }
             side="bottom"
           >
@@ -158,11 +153,9 @@ const Navbar = ({
             >
               <FontAwesomeIcon
                 icon={faFloppyDisk}
-                className={`text-xs text-[#ffa116] ${cloudSyncStatus === "saving" ? "animate-pulse" : ""}`}
+                className="text-xs text-[#ffa116]"
               />
-              <span className="font-semibold">
-                {cloudSyncStatus === "saving" ? "Saving..." : "Save"}
-              </span>
+              <span className="font-semibold">Save</span>
               {activeSnippetName && (
                 <>
                   <span className="text-gray-500 text-[11px]">|</span>
@@ -172,11 +165,6 @@ const Navbar = ({
                   >
                     {activeSnippetName}
                   </span>
-                  {cleanCommand && (
-                    <span className="text-[#ffa116] bg-[#ffa116]/10 border border-[#ffa116]/30 px-1.5 py-0.5 rounded font-mono text-[10px] hidden sm:inline truncate max-w-[80px]">
-                      {cleanCommand}
-                    </span>
-                  )}
                 </>
               )}
             </button>
@@ -195,16 +183,18 @@ const Navbar = ({
             </button>
           </Tooltip>
 
-          {/* Local Saved Codes Dropdown Menu */}
+          {/* Saved Codes Dropdown Menu */}
           {dropdownOpen && (
             <div className="absolute top-full left-0 mt-1.5 w-72 sm:w-84 bg-[#222222] border border-[#3e3e3e] rounded-lg shadow-2xl z-50 overflow-hidden text-xs text-gray-200 animate-in fade-in zoom-in-95 duration-100">
+              {/* Header */}
               <div className="px-3 py-2 bg-[#1c1c1c] border-b border-[#333333] flex items-center justify-between">
                 <span className="font-semibold text-white">Saved Codes</span>
-                <span className="bg-[#2e2e2e] text-gray-300 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
-                  {displayedProblems.length} of {savedProblems.length}
+                <span className="bg-[#2e2e2e] text-gray-300 text-[10px] px-1.5 py-0.5 rounded-full font-mono">
+                  {codesPagination?.total ?? savedCodes.length} total
                 </span>
               </div>
 
+              {/* Search */}
               <div className="p-2 border-b border-[#333333] bg-[#1a1a1a]">
                 <div className="relative">
                   <FontAwesomeIcon
@@ -214,59 +204,48 @@ const Navbar = ({
                   <input
                     type="text"
                     value={searchFilter}
-                    onChange={(e) => setSearchFilter(e.target.value)}
-                    placeholder="Filter saved codes..."
+                    onChange={handleSearchChange}
+                    placeholder="Search codes..."
                     className="w-full pl-7 pr-2.5 py-1 bg-[#121212] border border-[#3e3e3e] rounded text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-[#ffa116]"
                   />
                 </div>
               </div>
 
+              {/* Code list */}
               <div className="max-h-64 overflow-y-auto divide-y divide-[#2d2d2d]">
-                {displayedProblems.length === 0 ? (
+                {codesLoading && savedCodes.length === 0 ? (
+                  <div className="p-4 text-center text-gray-500 text-[11px] flex items-center justify-center space-x-2">
+                    <FontAwesomeIcon icon={faSpinner} className="animate-spin" />
+                    <span>Loading...</span>
+                  </div>
+                ) : savedCodes.length === 0 ? (
                   <div className="p-4 text-center text-gray-500 text-[11px]">
-                    {savedProblems.length === 0
-                      ? "No saved codes yet."
-                      : "No matching codes found."}
+                    {searchFilter ? "No matching codes." : "No saved codes yet."}
                   </div>
                 ) : (
-                  displayedProblems.map((problem) => (
+                  savedCodes.map((codeItem) => (
                     <div
-                      key={problem.id}
+                      key={codeItem.codeId || codeItem._id || codeItem.id}
                       className="p-2.5 hover:bg-[#2a2a2a] transition-colors flex items-center justify-between gap-2 group"
                     >
                       <div
                         onClick={() => {
-                          onLoadProblem(problem);
+                          onLoadCode && onLoadCode(codeItem);
                           setDropdownOpen(false);
                         }}
                         className="cursor-pointer min-w-0 flex-1"
                       >
-                        <div className="flex items-center space-x-1.5 flex-wrap">
-                          <span className="font-medium text-white truncate text-[12px] group-hover:text-[#ffa116] transition-colors">
-                            {problem.name}
-                          </span>
-                          {problem.command && (
-                            <span className="text-[10px] bg-[#ffa116]/10 text-[#ffa116] border border-[#ffa116]/30 px-1 py-0.2 rounded font-mono">
-                              {problem.command}
-                            </span>
-                          )}
-                          {problem.isCloud && (
-                            <span className="text-[10px] bg-sky-950/60 text-[#00b4d8] border border-sky-800/40 px-1 py-0.2 rounded font-mono">
-                              cloud
-                            </span>
-                          )}
+                        <div className="font-medium text-white truncate text-[12px] group-hover:text-[#ffa116] transition-colors">
+                          {codeItem.title}
                         </div>
-                        <div className="text-[10px] text-gray-500 mt-0.5 flex items-center space-x-2">
-                          <span>{problem.languageName || "C++"}</span>
-                          <span>•</span>
-                          <span>{problem.testCases?.length || 0} cases</span>
+                        <div className="text-[10px] text-gray-500 mt-0.5">
+                          {codeItem.languageName || "Code"} • {codeItem.testCases?.length || 0} cases
                         </div>
                       </div>
-
                       <div className="flex items-center space-x-1 flex-shrink-0">
                         <button
                           type="button"
-                          onClick={() => setProblemToDelete(problem)}
+                          onClick={() => setCodeToDelete(codeItem)}
                           className="p-1 text-gray-500 hover:text-red-400 rounded transition-colors"
                           title="Delete saved code"
                         >
@@ -275,10 +254,11 @@ const Navbar = ({
                         <button
                           type="button"
                           onClick={() => {
-                            onLoadProblem(problem);
+                            onLoadCode && onLoadCode(codeItem);
                             setDropdownOpen(false);
                           }}
                           className="px-2 py-1 bg-[#2cbb5d] hover:bg-[#26a050] text-white rounded font-medium text-[11px] transition-colors shadow"
+                          title="Load code"
                         >
                           <FontAwesomeIcon icon={faArrowRight} className="text-[9px]" />
                         </button>
@@ -286,69 +266,28 @@ const Navbar = ({
                     </div>
                   ))
                 )}
+                {/* Load more */}
+                {codesPagination && codesPagination.page < codesPagination.totalPages && (
+                  <button
+                    type="button"
+                    onClick={onLoadMoreCodes}
+                    disabled={codesLoading}
+                    className="w-full py-2 text-center text-[11px] text-gray-400 hover:text-white hover:bg-[#2a2a2a] transition-colors disabled:opacity-50 flex items-center justify-center space-x-1.5"
+                  >
+                    {codesLoading ? (
+                      <>
+                        <FontAwesomeIcon icon={faSpinner} className="animate-spin text-[10px]" />
+                        <span>Loading...</span>
+                      </>
+                    ) : (
+                      "Load more..."
+                    )}
+                  </button>
+                )}
               </div>
-
-              {filteredProblems.length > 10 && (
-                <div className="px-3 py-1.5 text-center text-[10px] text-gray-500 bg-[#1a1a1a] border-t border-[#2d2d2d]">
-                  Showing top 10 results (use search above to filter)
-                </div>
-              )}
             </div>
           )}
         </div>
-
-        {/* Cloud Saved Snippet Author Badge & Live Auto-save Sync Status */}
-        {cloudSnippet && cloudSnippet.author && (
-          <div className="hidden sm:flex items-center space-x-1.5">
-            <Tooltip
-              content={`Saved on Cloud by @${cloudSnippet.author.username}${
-                user && cloudSnippet.author.id === user.id ? " (You)" : ""
-              }`}
-              side="bottom"
-            >
-              <Link
-                to={`/u/${cloudSnippet.author.username}`}
-                className="flex items-center space-x-1 px-2 py-1 text-xs text-gray-300 hover:text-white bg-[#222222] hover:bg-[#2b2b2b] border border-[#3e3e3e] rounded-md transition-colors"
-              >
-                <FontAwesomeIcon icon={faCloud} className="text-[#00b4d8] text-[10px]" />
-                <span className="text-gray-400 text-[11px]">by</span>
-                <span className="text-[#ffa116] font-medium text-[11px]">
-                  @{cloudSnippet.author.username}
-                </span>
-                {user && cloudSnippet.author.id === user.id && (
-                  <span className="text-[10px] text-gray-400 font-mono">(You)</span>
-                )}
-              </Link>
-            </Tooltip>
-
-            {user && cloudSnippet.author.id === user.id && cloudSyncStatus && cloudSyncStatus !== "idle" && (
-              <span
-                className={`text-[10px] px-1.5 py-0.5 rounded flex items-center space-x-1 font-mono transition-all ${
-                  cloudSyncStatus === "saving"
-                    ? "bg-amber-950/60 text-amber-300 border border-amber-800/50 animate-pulse"
-                    : cloudSyncStatus === "saved"
-                    ? "bg-[#1c2e22] text-[#2cbb5d] border border-[#2cbb5d]/40"
-                    : "bg-red-950/60 text-red-400 border border-red-800/40"
-                }`}
-                title={
-                  cloudSyncStatus === "saving"
-                    ? "Auto-saving changes to cloud (500ms debounce)..."
-                    : cloudSyncStatus === "saved"
-                    ? "All changes saved to cloud"
-                    : "Failed to auto-save to cloud"
-                }
-              >
-                <span>
-                  {cloudSyncStatus === "saving"
-                    ? "☁ saving..."
-                    : cloudSyncStatus === "saved"
-                    ? "✓ synced"
-                    : "⚠ sync error"}
-                </span>
-              </span>
-            )}
-          </div>
-        )}
 
         {/* Share Button */}
         {onShare && (
@@ -469,16 +408,16 @@ const Navbar = ({
       </div>
 
       <DeleteConfirmModal
-        isOpen={Boolean(problemToDelete)}
-        onClose={() => setProblemToDelete(null)}
+        isOpen={Boolean(codeToDelete)}
+        onClose={() => setCodeToDelete(null)}
         onConfirm={() => {
-          if (problemToDelete) {
-            onDeleteProblem(problemToDelete.id);
-            setProblemToDelete(null);
+          if (codeToDelete) {
+            onDeleteCode && onDeleteCode(codeToDelete.codeId || codeToDelete._id || codeToDelete.id);
+            setCodeToDelete(null);
           }
         }}
         title="Delete Saved Code"
-        itemName={problemToDelete?.name}
+        itemName={codeToDelete?.title}
       />
     </div>
   );

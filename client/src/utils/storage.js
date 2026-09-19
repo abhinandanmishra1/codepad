@@ -1,5 +1,4 @@
-import { INITIAL_SEEDED_TEMPLATES } from "../components/Templates/defaultTemplates";
-import { boilerCodes } from "../boilerCodes";
+import { boilerCodes } from "../boilerCodes/index.js";
 
 // CodePad storage keys (with legacy leetcode_ide_* fallbacks)
 export const CODE_PREFIX = "codepad_code_";
@@ -17,15 +16,6 @@ export const LEGACY_LAST_LANG_KEY = "leetcode_ide_last_lang";
 export const LAST_THEME_KEY = "codepad_last_theme";
 export const LEGACY_LAST_THEME_KEY = "leetcode_ide_last_theme";
 
-export const SAVED_PROBLEMS_KEY = "codepad_saved_problems";
-export const LEGACY_SAVED_PROBLEMS_KEY = "leetcode_ide_saved_problems";
-
-export const TEMPLATES_KEY = "codepad_templates";
-export const LEGACY_TEMPLATES_KEY = "leetcode_ide_templates";
-
-export const TEMPLATES_SEEDED_KEY = "codepad_templates_seeded_v3";
-export const LEGACY_TEMPLATES_SEEDED_KEY = "leetcode_ide_templates_seeded";
-
 export const DEFAULT_TESTCASES = [
   {
     id: "1",
@@ -35,30 +25,6 @@ export const DEFAULT_TESTCASES = [
   },
 ];
 
-/**
- * Normalizes a user-provided name to a unique identifier:
- * Replaces spaces with "_", strips invalid characters, lowercases.
- * e.g., "Two Sum Solution" -> "two_sum_solution"
- */
-export const normalizeId = (name) => {
-  if (!name) return "";
-  return name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9\s_-]/g, "")
-    .replace(/\s+/g, "_");
-};
-
-/**
- * Normalizes a slash command shortcut:
- * Ensures it starts with "/" and contains only valid command characters.
- * e.g., "trie" -> "/trie", "/dsu" -> "/dsu"
- */
-export const normalizeCommand = (cmd) => {
-  if (!cmd) return "";
-  const cleaned = cmd.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "");
-  return cleaned.startsWith("/") ? cleaned : `/${cleaned}`;
-};
 
 /**
  * Helper to get an item from localStorage with transparent legacy fallback and migration.
@@ -236,157 +202,46 @@ export const saveTheme = (theme) => {
 };
 
 // ============================================================
-// SAVED PROBLEMS / CODES MANAGER
+// SNIPPET CACHE (user-scoped, localStorage-backed, for Monaco registration)
 // ============================================================
 
-export const getSavedProblems = () => {
+export const SNIPPETS_CACHE_KEY = "codepad_snippets_cache";
+export const SNIPPETS_CACHE_UID_KEY = "codepad_snippets_cache_uid";
+
+/** Returns cached snippets array for userId, or null on miss/mismatch */
+export const getSnippetsCache = (userId) => {
   try {
-    const raw = getItemWithFallback(SAVED_PROBLEMS_KEY, LEGACY_SAVED_PROBLEMS_KEY);
-    if (!raw) return [];
-    const list = JSON.parse(raw);
-    return Array.isArray(list) ? list.sort((a, b) => b.updatedAt - a.updatedAt) : [];
+    if (!userId) return null;
+    const cachedUid = localStorage.getItem(SNIPPETS_CACHE_UID_KEY);
+    if (cachedUid !== String(userId)) return null;
+    const raw = localStorage.getItem(SNIPPETS_CACHE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
   } catch {
-    return [];
-  }
-};
-
-export const getSavedProblem = (id) => {
-  const list = getSavedProblems();
-  return list.find((p) => p.id === id) || null;
-};
-
-export const saveProblem = (problem) => {
-  try {
-    const list = getSavedProblems();
-    const id = problem.id || normalizeId(problem.name);
-    const existingIndex = list.findIndex((p) => p.id === id);
-
-    const now = Date.now();
-    const savedItem = {
-      ...problem,
-      id,
-      name: problem.name || id,
-      updatedAt: now,
-      createdAt: existingIndex >= 0 ? list[existingIndex].createdAt : now,
-    };
-
-    if (existingIndex >= 0) {
-      list[existingIndex] = savedItem;
-    } else {
-      list.unshift(savedItem);
-    }
-
-    localStorage.setItem(SAVED_PROBLEMS_KEY, JSON.stringify(list));
-    return savedItem;
-  } catch (e) {
-    console.warn("Failed to save problem to localStorage:", e);
     return null;
   }
 };
 
-export const deleteProblem = (id) => {
+/** Persists all snippet DTOs for the given user */
+export const setSnippetsCache = (userId, snippets) => {
   try {
-    const list = getSavedProblems().filter((p) => p.id !== id);
-    localStorage.setItem(SAVED_PROBLEMS_KEY, JSON.stringify(list));
-    return true;
+    if (!userId) return;
+    localStorage.setItem(SNIPPETS_CACHE_UID_KEY, String(userId));
+    localStorage.setItem(SNIPPETS_CACHE_KEY, JSON.stringify(snippets));
   } catch (e) {
-    return false;
+    console.warn("Failed to cache snippets:", e);
   }
 };
 
-// ============================================================
-// LANGUAGE-SPECIFIC SLASH COMMAND TEMPLATES
-// ============================================================
-
-/**
- * Loads templates from localStorage.
- * Seeds INITIAL_SEEDED_TEMPLATES on first run only.
- * If languageId is provided, returns templates for that language.
- */
-export const getTemplates = (languageId) => {
+/** Clears snippet cache — call on logout or after any snippet mutation */
+export const clearSnippetsCache = () => {
   try {
-    const raw = getItemWithFallback(TEMPLATES_KEY, LEGACY_TEMPLATES_KEY);
-    const existing = raw ? JSON.parse(raw) : [];
-    // Only return user-created custom templates, purge seeded templates
-    const list = existing.filter(
-      (t) =>
-        !t.id?.startsWith("boilerplate_") &&
-        !t.id?.startsWith("binarysearch_") &&
-        !t.id?.startsWith("segtree_") &&
-        !t.id?.startsWith("dsu_") &&
-        !t.id?.startsWith("bitmask_dp_") &&
-        !t.command?.toLowerCase().includes("fib")
-    );
-    if (list.length !== existing.length) {
-      localStorage.setItem(TEMPLATES_KEY, JSON.stringify(list));
-    }
-
-    if (languageId) {
-      return list.filter((t) => !t.languageId || t.languageId === languageId);
-    }
-    return list;
-  } catch {
-    return [];
-  }
+    localStorage.removeItem(SNIPPETS_CACHE_KEY);
+    localStorage.removeItem(SNIPPETS_CACHE_UID_KEY);
+  } catch {}
 };
-
-export const findExistingTemplate = (command, languageId) => {
-  if (!command) return null;
-  const normCmd = normalizeCommand(command);
-  const all = getTemplates();
-  return all.find((t) => t.command === normCmd && (!t.languageId || t.languageId === languageId)) || null;
-};
-
-export const saveTemplate = (template) => {
-  try {
-    const normCmd = normalizeCommand(template.command);
-    const all = getTemplates(); // all languages
-
-    const existingIndex = all.findIndex(
-      (t) => t.command === normCmd && t.languageId === template.languageId
-    );
-
-    const item = {
-      ...template,
-      command: normCmd,
-      updatedAt: Date.now(),
-    };
-
-    if (existingIndex >= 0) {
-      all[existingIndex] = item;
-    } else {
-      all.unshift(item);
-    }
-
-    localStorage.setItem(TEMPLATES_KEY, JSON.stringify(all));
-    return item;
-  } catch (e) {
-    console.warn("Failed to save template to localStorage:", e);
-    return null;
-  }
-};
-
-export const deleteTemplate = (command, languageId) => {
-  try {
-    const normCmd = normalizeCommand(command);
-    const all = getTemplates(); // all languages
-    const filtered = all.filter(
-      (t) => !(t.command === normCmd && (!languageId || t.languageId === languageId))
-    );
-    localStorage.setItem(TEMPLATES_KEY, JSON.stringify(filtered));
-    return true;
-  } catch (e) {
-    return false;
-  }
-};
-
-export const getCustomTemplates = getTemplates;
-export const saveCustomTemplate = saveTemplate;
-export const deleteCustomTemplate = deleteTemplate;
 
 const storageService = {
-  normalizeId,
-  normalizeCommand,
   getItemWithFallback,
   getSavedCode,
   saveCode,
@@ -400,17 +255,9 @@ const storageService = {
   saveLanguage,
   getSavedTheme,
   saveTheme,
-  getSavedProblems,
-  getSavedProblem,
-  saveProblem,
-  deleteProblem,
-  getTemplates,
-  findExistingTemplate,
-  saveTemplate,
-  deleteTemplate,
-  getCustomTemplates,
-  saveCustomTemplate,
-  deleteCustomTemplate,
+  getSnippetsCache,
+  setSnippetsCache,
+  clearSnippetsCache,
   CODE_PREFIX,
   LEGACY_CODE_PREFIX,
   STDIN_PREFIX,
@@ -421,12 +268,9 @@ const storageService = {
   LEGACY_LAST_LANG_KEY,
   LAST_THEME_KEY,
   LEGACY_LAST_THEME_KEY,
-  SAVED_PROBLEMS_KEY,
-  LEGACY_SAVED_PROBLEMS_KEY,
-  TEMPLATES_KEY,
-  LEGACY_TEMPLATES_KEY,
-  TEMPLATES_SEEDED_KEY,
-  LEGACY_TEMPLATES_SEEDED_KEY,
+  DEFAULT_TESTCASES,
+  SNIPPETS_CACHE_KEY,
+  SNIPPETS_CACHE_UID_KEY,
 };
 
 export default storageService;

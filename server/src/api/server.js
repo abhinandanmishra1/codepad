@@ -7,6 +7,7 @@ import languagesRouter from './routes/languages.js';
 import healthRouter from './routes/health.js';
 import authRouter from './routes/auth.js';
 import snippetsRouter from './routes/snippets.js';
+import codesRouter from './routes/codes.js';
 import usersRouter from './routes/users.js';
 import learningsRouter from './routes/learnings.js';
 import requestLogger from './middleware/requestLogger.js';
@@ -50,6 +51,7 @@ export async function startServer(port = config.port) {
   app.use('/submissions', submissionsRouter);
   app.use('/auth', authRouter);
   app.use('/snippets', snippetsRouter);
+  app.use('/codes', codesRouter);
   app.use('/users', usersRouter);
   app.use('/learnings', learningsRouter);
 

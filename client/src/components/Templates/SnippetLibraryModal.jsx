@@ -9,6 +9,7 @@ import {
   faCode,
   faBolt,
   faTrash,
+  faSpinner,
 } from "@fortawesome/free-solid-svg-icons";
 import Tooltip from "../ui/tooltip";
 import DeleteConfirmModal from "../common/DeleteConfirmModal";
@@ -20,6 +21,8 @@ export const SnippetLibraryModal = ({
   currentLanguage,
   onInsertSnippet,
   onDeleteSnippet,
+  loading = false,
+  onSaveAsSnippet,
 }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [copiedCmd, setCopiedCmd] = useState(null);
@@ -30,8 +33,8 @@ export const SnippetLibraryModal = ({
     const q = searchQuery.toLowerCase();
     return allSnippets.filter(
       (s) =>
-        s.name.toLowerCase().includes(q) ||
-        s.command.toLowerCase().includes(q) ||
+        (s.name && s.name.toLowerCase().includes(q)) ||
+        (s.command && s.command.toLowerCase().includes(q)) ||
         (s.code && s.code.toLowerCase().includes(q))
     );
   }, [allSnippets, searchQuery]);
@@ -98,15 +101,20 @@ export const SnippetLibraryModal = ({
 
         {/* Compact Snippet Rows matching LeetCode */}
         <div className="flex-1 overflow-y-auto divide-y divide-[#2d2d2d] p-1">
-          {filtered.length === 0 ? (
+          {loading ? (
+            <div className="p-8 text-center text-gray-500 flex items-center justify-center space-x-2">
+              <FontAwesomeIcon icon={faSpinner} className="animate-spin" />
+              <span>Loading snippets...</span>
+            </div>
+          ) : filtered.length === 0 ? (
             <div className="p-8 text-center text-gray-500 space-y-1">
               <p>No snippets found for {currentLanguage?.name || "this language"}.</p>
-              <p className="text-[11px] text-gray-600">Save a code with a slash command shortcut to create a new snippet.</p>
+              <p className="text-[11px] text-gray-600">Click "+ New Snippet" to create one with a slash command.</p>
             </div>
           ) : (
             filtered.map((snippet) => (
               <div
-                key={`${snippet.command}_${snippet.languageId || "all"}`}
+                key={snippet.snippetId || `${snippet.command}_${snippet.languageId || "all"}`}
                 className="flex items-center justify-between px-4 py-3 hover:bg-[#282828] transition-colors gap-3 group"
               >
                 {/* Left: Icon, Name, Command, Description */}
@@ -173,11 +181,20 @@ export const SnippetLibraryModal = ({
         </div>
 
         {/* Footer */}
-        <div className="p-3 bg-[#1e1e1e] border-t border-[#333333] flex justify-end flex-shrink-0">
+        <div className="p-3 bg-[#1e1e1e] border-t border-[#333333] flex justify-between items-center flex-shrink-0">
+          {onSaveAsSnippet && (
+            <button
+              type="button"
+              onClick={onSaveAsSnippet}
+              className="px-3 py-1.5 rounded-lg bg-[#ffa116] hover:bg-[#e08d0e] text-black font-semibold text-xs transition-colors"
+            >
+              + New Snippet
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-1.5 rounded-lg bg-[#333333] hover:bg-[#3f3f3f] text-gray-300 hover:text-white font-medium transition-colors text-xs"
+            className="px-4 py-1.5 rounded-lg bg-[#333333] hover:bg-[#3f3f3f] text-gray-300 hover:text-white font-medium transition-colors text-xs ml-auto"
           >
             Close
           </button>
@@ -189,7 +206,12 @@ export const SnippetLibraryModal = ({
         onClose={() => setSnippetToDelete(null)}
         onConfirm={() => {
           if (snippetToDelete && onDeleteSnippet) {
-            onDeleteSnippet(snippetToDelete.command, snippetToDelete.languageId || currentLanguage?.id);
+            onDeleteSnippet(
+              snippetToDelete.snippetId ||
+                snippetToDelete._id ||
+                snippetToDelete.id ||
+                snippetToDelete.command
+            );
             setSnippetToDelete(null);
           }
         }}

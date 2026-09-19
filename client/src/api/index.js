@@ -67,27 +67,56 @@ export const authApi = {
   },
 };
 
+// ==================== CODES API ====================
+
+export const codesApi = {
+  getMyCodes: async (params = {}) => {
+    const res = await apiClient.get("/codes/me", { params });
+    return res.data;
+  },
+  create: async (data) => {
+    const res = await apiClient.post("/codes", data);
+    return res.data;
+  },
+  update: async (codeId, data) => {
+    const res = await apiClient.put(`/codes/${codeId}`, data);
+    return res.data;
+  },
+  delete: async (codeId) => {
+    const res = await apiClient.delete(`/codes/${codeId}`);
+    return res.data;
+  },
+};
+
 // ==================== SNIPPETS API ====================
 
 export const snippetsApi = {
-  create: async (data) => {
-    const res = await apiClient.post("/snippets", data);
+  getMySnippets: async (params = {}) => {
+    const res = await apiClient.get("/snippets/me", { params });
+    return res.data;
+  },
+  getPublic: async (params = {}) => {
+    const res = await apiClient.get("/snippets", { params });
     return res.data;
   },
   getById: async (snippetId) => {
     const res = await apiClient.get(`/snippets/${snippetId}`);
     return res.data;
   },
+  create: async (data) => {
+    const res = await apiClient.post("/snippets", data);
+    return res.data;
+  },
   update: async (snippetId, data) => {
     const res = await apiClient.put(`/snippets/${snippetId}`, data);
     return res.data;
   },
-  fork: async (snippetId) => {
-    const res = await apiClient.post(`/snippets/${snippetId}/fork`);
+  delete: async (snippetId) => {
+    const res = await apiClient.delete(`/snippets/${snippetId}`);
     return res.data;
   },
-  getPublic: async (params = {}) => {
-    const res = await apiClient.get("/snippets", { params });
+  fork: async (snippetId) => {
+    const res = await apiClient.post(`/snippets/${snippetId}/fork`);
     return res.data;
   },
 };
@@ -155,6 +184,7 @@ const apiService = {
   checkStatus,
   auth: authApi,
   snippets: snippetsApi,
+  codes: codesApi,
   users: usersApi,
   learnings: learningsApi,
 };
