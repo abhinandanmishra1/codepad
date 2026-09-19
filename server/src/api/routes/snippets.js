@@ -126,7 +126,13 @@ router.post('/', authenticateUser, async (req, res) => {
   if (!CMD_REGEX.test(normalizedCmd)) {
     return res.status(400).json({ error: 'Validation Error', message: 'command must start with / and match /[a-z0-9_-]+ (e.g. /trie)' });
   }
+
   try {
+    const existing = await Snippet.findOne({ author: req.user._id, command: normalizedCmd });
+    if (existing) {
+      return res.status(409).json({ error: 'Conflict', message: `Command "${normalizedCmd}" already exists. Use a different command.` });
+    }
+
     const chosenVisibility = visibility && ['unlisted', 'public', 'private'].includes(visibility)
       ? visibility
       : (isPublic !== undefined ? (isPublic ? 'public' : 'unlisted') : 'public');
