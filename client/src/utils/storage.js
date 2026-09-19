@@ -25,30 +25,6 @@ export const DEFAULT_TESTCASES = [
   },
 ];
 
-/**
- * Normalizes a user-provided name to a unique identifier:
- * Replaces spaces with "_", strips invalid characters, lowercases.
- * e.g., "Two Sum Solution" -> "two_sum_solution"
- */
-export const normalizeId = (name) => {
-  if (!name) return "";
-  return name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9\s_-]/g, "")
-    .replace(/\s+/g, "_");
-};
-
-/**
- * Normalizes a slash command shortcut:
- * Ensures it starts with "/" and contains only valid command characters.
- * e.g., "trie" -> "/trie", "/dsu" -> "/dsu"
- */
-export const normalizeCommand = (cmd) => {
-  if (!cmd) return "";
-  const cleaned = cmd.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "");
-  return cleaned.startsWith("/") ? cleaned : `/${cleaned}`;
-};
 
 /**
  * Helper to get an item from localStorage with transparent legacy fallback and migration.
@@ -265,24 +241,7 @@ export const clearSnippetsCache = () => {
   } catch {}
 };
 
-// ============================================================
-// DEPRECATED STUBS (Temporary for backward-compatibility until Tasks 7-11 rewire IdePage & SaveModal)
-// ============================================================
-export const getSavedProblems = () => [];
-export const getSavedProblem = () => null;
-export const saveProblem = () => null;
-export const deleteProblem = () => false;
-export const getTemplates = () => [];
-export const findExistingTemplate = () => null;
-export const saveTemplate = () => null;
-export const deleteTemplate = () => false;
-export const getCustomTemplates = () => [];
-export const saveCustomTemplate = () => null;
-export const deleteCustomTemplate = () => false;
-
 const storageService = {
-  normalizeId,
-  normalizeCommand,
   getItemWithFallback,
   getSavedCode,
   saveCode,
