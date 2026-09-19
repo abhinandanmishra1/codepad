@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { authApi } from "../api";
+import { clearSnippetsCache } from "../utils/storage";
 
 const AuthContext = createContext(null);
 
@@ -68,6 +69,7 @@ export const AuthProvider = ({ children }) => {
 
   const logout = () => {
     localStorage.removeItem("codepad_auth_token");
+    clearSnippetsCache();
     setToken(null);
     setUser(null);
   };
