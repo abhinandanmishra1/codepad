@@ -28,9 +28,13 @@ const snippetSchema = new mongoose.Schema(
     },
     command: {
       type: String,
-      default: '',
+      required: true,
       trim: true,
       maxlength: 50,
+      validate: {
+        validator: (v) => /^\/[a-z0-9_-]{1,49}$/.test(v),
+        message: 'Command must start with / and contain only lowercase letters, digits, hyphens, or underscores',
+      },
     },
     description: {
       type: String,
@@ -90,6 +94,7 @@ const snippetSchema = new mongoose.Schema(
 
 // Add text search index on title and description
 snippetSchema.index({ title: 'text', description: 'text' });
+snippetSchema.index({ author: 1, command: 1 }, { unique: true });
 
 const Snippet = mongoose.models.Snippet || mongoose.model('Snippet', snippetSchema);
 
